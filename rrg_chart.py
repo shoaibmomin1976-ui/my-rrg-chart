@@ -24,8 +24,8 @@ SECTORS = {
     "Pharma":   "PHARMABEES.NS",
     "FMCG":     "CONSUMBEES.NS",
     "PSU Bank": "PSUBNKBEES.NS",
-    "Energy":   "ENERGYBEES.NS",
-    "Infra":    "INFRABEES.NS",
+    "Metal":    "METALIETF.NS",
+    "Midcap":   "MID150BEES.NS",
 }
 # If any ETF above doesn't exist/trade, drop it from the dict -
 # NSE ETF lineups change; check the symbol on nseindia.com or Yahoo Finance first.
@@ -36,9 +36,26 @@ MOM_WINDOW = 10                 # weeks over which momentum (ROC) is measured
 EMA_SPAN = 3                   # smoothing
 
 # ---- 2. DOWNLOAD DATA ----
+# Download each ticker separately and skip any that fail (missing/delisted
+# symbols shouldn't crash the whole chart) - print a warning instead.
 tickers = list(SECTORS.values()) + [BENCHMARK]
-data = yf.download(tickers, period=LOOKBACK_PERIOD, interval="1wk")["Close"]
-data = data.dropna(how="all").ffill()
+series = {}
+for t in tickers:
+    try:
+        s = yf.download(t, period=LOOKBACK_PERIOD, interval="1wk", progress=False)["Close"]
+        if s.empty:
+            raise ValueError("no data returned")
+        series[t] = s
+    except Exception as e:
+        print(f"WARNING: skipping {t} - {e}")
+
+if BENCHMARK not in series:
+    raise SystemExit(f"Benchmark {BENCHMARK} failed to download - cannot continue.")
+
+# Drop any sector whose ticker failed to download
+SECTORS = {name: t for name, t in SECTORS.items() if t in series}
+
+data = pd.DataFrame(series).dropna(how="all").ffill()
 
 # ---- 3. COMPUTE RS-RATIO AND RS-MOMENTUM (JdK-style) ----
 def rs_ratio_momentum(sector_close, bench_close):
@@ -55,7 +72,14 @@ def rs_ratio_momentum(sector_close, bench_close):
 results = {}
 for name, ticker in SECTORS.items():
     ratio, mom = rs_ratio_momentum(data[ticker], data[BENCHMARK])
-    results[name] = pd.DataFrame({"ratio": ratio, "momentum": mom}).dropna()
+    df = pd.DataFrame({"ratio": ratio, "momentum": mom}).dropna()
+    if df.empty:
+        print(f"WARNING: not enough data to plot {name} ({ticker}), skipping.")
+        continue
+    results[name] = df
+
+if not results:
+    raise SystemExit("No sectors had enough data to plot.")
 
 # ---- 4. PLOT ----
 fig, ax = plt.subplots(figsize=(9, 9))
