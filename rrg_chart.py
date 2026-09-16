@@ -36,26 +36,45 @@ MOM_WINDOW = 10                 # weeks over which momentum (ROC) is measured
 EMA_SPAN = 3                   # smoothing
 
 # ---- 2. DOWNLOAD DATA ----
-# Download each ticker separately and skip any that fail (missing/delisted
-# symbols shouldn't crash the whole chart) - print a warning instead.
+# Download each ticker separately, with retries and a short delay between
+# requests - Yahoo Finance sometimes rate-limits requests from cloud/CI IPs
+# (like GitHub Actions), so we retry a couple of times before giving up.
+import time
+
 tickers = list(SECTORS.values()) + [BENCHMARK]
 series = {}
 for t in tickers:
-    try:
-        s = yf.download(t, period=LOOKBACK_PERIOD, interval="1wk", progress=False)["Close"]
-        if s.empty:
-            raise ValueError("no data returned")
-        series[t] = s
-    except Exception as e:
-        print(f"WARNING: skipping {t} - {e}")
+    ok = False
+    for attempt in range(3):
+        try:
+            df = yf.Ticker(t).history(period=LOOKBACK_PERIOD, interval="1wk")
+            if df is None or df.empty or "Close" not in df.columns:
+                raise ValueError(f"no usable data (attempt {attempt+1})")
+            s = df["Close"]
+            if not isinstance(s, pd.Series) or s.dropna().empty:
+                raise ValueError(f"unexpected/empty Close data (attempt {attempt+1})")
+            series[t] = s
+            ok = True
+            break
+        except Exception as e:
+            print(f"attempt {attempt+1} for {t} failed: {e}")
+            time.sleep(2)
+    if not ok:
+        print(f"WARNING: giving up on {t} after 3 attempts - skipping.")
+    time.sleep(1)  # be gentle between tickers
+
+print(f"Successfully downloaded: {list(series.keys())}")
 
 if BENCHMARK not in series:
     raise SystemExit(f"Benchmark {BENCHMARK} failed to download - cannot continue.")
 
 # Drop any sector whose ticker failed to download
 SECTORS = {name: t for name, t in SECTORS.items() if t in series}
+if not SECTORS:
+    raise SystemExit("No sector tickers downloaded successfully - cannot continue.")
 
-data = pd.DataFrame(series).dropna(how="all").ffill()
+data = pd.concat(series, axis=1).dropna(how="all").ffill()
+data.columns = list(series.keys())
 
 # ---- 3. COMPUTE RS-RATIO AND RS-MOMENTUM (JdK-style) ----
 def rs_ratio_momentum(sector_close, bench_close):
