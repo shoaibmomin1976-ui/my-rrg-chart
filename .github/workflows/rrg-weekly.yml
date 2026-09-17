@@ -21,7 +21,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install yfinance pandas numpy matplotlib
+        run: pip install yfinance pandas numpy plotly
 
       - name: Run RRG script
         run: python rrg_chart.py
@@ -30,6 +30,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add rrg_chart.png
+          git add docs/index.html
           git diff --quiet --cached || git commit -m "Weekly auto-update RRG chart $(date -u +'%Y-%m-%d')"
           git push
