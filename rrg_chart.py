@@ -270,6 +270,64 @@ fig.update_layout(
 )
 
 os.makedirs("docs", exist_ok=True)
-fig.write_html("docs/index.html", include_plotlyjs="cdn")
-print("Saved chart to docs/index.html")
+
+# ---- 6. QUADRANT SUMMARY PANEL (Improving/Leading/Lagging/Weakening) ----
+# Classify each sector's LATEST weekly point into a quadrant, like stockmojo's
+# summary boxes. Ties (exactly 100) count as the "weaker" side on each axis.
+quadrants = {"Leading": [], "Improving": [], "Lagging": [], "Weakening": []}
+for name, tail in sector_weekly.items():
+    r, m = tail["ratio"].iloc[-1], tail["momentum"].iloc[-1]
+    if r >= 100 and m >= 100:
+        quadrants["Leading"].append(name)
+    elif r < 100 and m >= 100:
+        quadrants["Improving"].append(name)
+    elif r < 100 and m < 100:
+        quadrants["Lagging"].append(name)
+    else:
+        quadrants["Weakening"].append(name)
+
+QUAD_COLORS = {
+    "Improving": ("#1e40af", "#dbeafe"),
+    "Leading":   ("#15803d", "#dcfce7"),
+    "Lagging":   ("#b91c1c", "#fee2e2"),
+    "Weakening": ("#b45309", "#fef3c7"),
+}
+
+def render_box(title):
+    text_c, bg_c = QUAD_COLORS[title]
+    items = sorted(quadrants[title])
+    rows = "".join(f'<li style="padding:6px 0;border-bottom:1px solid #eee;">{n}</li>' for n in items) or '<li style="padding:6px 0;color:#999;">None</li>'
+    return f'''
+    <div style="background:{bg_c};border-radius:10px;padding:14px 16px;min-width:220px;flex:1;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="color:{text_c};font-weight:700;font-size:16px;">{title}</span>
+        <span style="background:{text_c};color:white;border-radius:12px;padding:2px 10px;font-size:13px;font-weight:600;">{len(items)}</span>
+      </div>
+      <ul style="list-style:none;margin:8px 0 0 0;padding:0;font-size:14px;color:#333;">{rows}</ul>
+    </div>'''
+
+summary_html = f'''
+<div style="font-family:Arial, sans-serif;max-width:1050px;margin:0 auto;">
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;">
+    {render_box("Improving")}{render_box("Leading")}
+  </div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;">
+    {render_box("Lagging")}{render_box("Weakening")}
+  </div>
+</div>'''
+
+chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+page_html = f'''<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Sector Rotation - RRG</title></head>
+<body style="margin:0;padding:20px;background:#fafafa;">
+{summary_html}
+<div style="max-width:1050px;margin:20px auto 0 auto;">{chart_html}</div>
+</body></html>'''
+
+with open("docs/index.html", "w", encoding="utf-8") as f:
+    f.write(page_html)
+
+print("Saved chart with summary panel to docs/index.html")
 print(f"Groups built: {[(k, len(v)) for k, v in groups.items()]}")
+print(f"Quadrant summary: {[(k, len(v)) for k, v in quadrants.items()]}")
